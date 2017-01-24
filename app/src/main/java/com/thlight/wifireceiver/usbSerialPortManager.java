@@ -30,36 +30,27 @@ public class usbSerialPortManager {
 	UsbDevice device	   		= null;
 	
 	String OutputStirng = "";
-	
-//	UsbDeviceConnection mUsbConnection_1 = null;
-//	
-//	UsbInterface mUsbIntf_1 	= null;
-//	UsbEndpoint Endpoint_out_1 	= null;
-//	UsbEndpoint Endpoint_in_1  	= null;
-//	
-//	UsbDeviceConnection mUsbConnection_2 = null;
-//	
-//	UsbInterface mUsbIntf_2 	= null;
-//	UsbEndpoint Endpoint_out_2 	= null;
-//	UsbEndpoint Endpoint_in_2  	= null;
-	
-	UsbDeviceConnection[] mUsbConnections = null;
-	
-	UsbInterface[] mUsbIntfs 	= null;
-	UsbEndpoint[] Endpoint_outs 	= null;
-	UsbEndpoint[] Endpoint_ins  	= null;
-	
-	int deviceSize = 0;
 
-	Context context = null;
+    final int ReceiverScanPeriod = 1000;        //1s
+    final int ReceiverStopPeriod = 100;         // 0.1s,  Receiver will scan for ReceiverScanPeriod, and stop ReceiverStopPeriod
+	
+	private UsbDeviceConnection[] mUsbConnections = null;
+	
+	private UsbInterface[] mUsbIntfs 	= null;
+	private UsbEndpoint[] Endpoint_outs 	= null;
+	private UsbEndpoint[] Endpoint_ins  	= null;
+	
+	private int deviceSize = 0;
+
+	private Context context = null;
 	
 	boolean isOurDevice = false;
 	
-	String DeviceInfoString = "";
+	private String DeviceInfoString = "";
 	
-	Handler mHandler = null;
+	private Handler mHandler = null;
 	
-	boolean[] aIsReceiver = null;
+	static boolean[] aIsReceiver = null;
 
 	public usbSerialPortManager(Context context)
 	{
@@ -82,6 +73,8 @@ public class usbSerialPortManager {
 	/** ================================================ */
 	public int getSerialPortData(byte[] buf,int index)
 	{
+		// 1000 : the length of the data to send or receive
+		// 500 : timeout	 : in milliseconds
 		return mUsbConnections[index].bulkTransfer(Endpoint_ins[index], buf ,1000, 500);
 	}
 
@@ -107,9 +100,10 @@ public class usbSerialPortManager {
                      	{
                      		if(isOurDevice)
                      		{
-                     			SerialSettingInitial(0);
-                     			if(getDeviceSize()>1)
-                     				SerialSettingInitial(1);
+                                for(int i = 0; i<getDeviceSize(); i++)
+                                {
+                                    SerialSettingInitial(i);
+                                }
                      		}
                      	}
                     }
@@ -126,7 +120,7 @@ public class usbSerialPortManager {
 	public void SerialSettingInitial(int index)
 	{
         //Performs a control transaction on endpoint zero for this device.
-        // 0x40 PC要下給 USB Device 的 Vendor  Command
+        // 0x40 PC要下給 USB Device 的 Vendor  Command    USB_TYPE_VENDOR
 		mUsbConnections[index].controlTransfer(0x40, 0, 0, 0, null, 0, 25);// reset
  		mUsbConnections[index].controlTransfer(0x40, 0, 1, 0, null, 0, 25);//clear Rx
  		mUsbConnections[index].controlTransfer(0x40, 0, 2, 0, null, 0, 25);// clear Tx
@@ -139,6 +133,8 @@ public class usbSerialPortManager {
 														                    // none,
 														                    // stop bit
 														                    // 1, tx off
+        //Claims exclusive access to a UsbInterface.
+        //true to disconnect kernel driver if necessary
  		mUsbConnections[index].claimInterface(mUsbIntfs[index], true);   
  		
  		startScan(index);
@@ -174,23 +170,26 @@ public class usbSerialPortManager {
 		
  		mHandler.postDelayed(new Runnable() {
 			public void run() {
-				SendCMD(OutputStirng,0);
-				if(getDeviceSize() >1)
-				{
-					SendCMD(OutputStirng,1);
-				}
+
+                //Only set Beacon command to beacon.
+                for (int i =0; i < getDeviceSize(); i++)
+                {
+                    if (!usbSerialPortManager.aIsReceiver[i]) {
+                        SendCMD(OutputStirng, i);
+                    }
+                }
 			}
 		}, 1500);
  		
 		mHandler.sendEmptyMessageDelayed(Constants.MSG_SHOW_LIGHT, 2000);
 	}
 	/** ================================================ */
-	public void USBintial()
+	public void USBInitial()
 	{
 		/*Returns a HashMap containing all USB devices currently attached.*/
 		HashMap<String, UsbDevice> deviceList = mUsbManager.getDeviceList();
 		
-		deviceSize = deviceList.size();
+		deviceSize = deviceList.size();   //Get the device size.
 
         aIsReceiver = new boolean[deviceSize];
 		for(int i = 0 ; i < deviceSize ; i++)
@@ -200,22 +199,22 @@ public class usbSerialPortManager {
         
         Toast.makeText(context, deviceList.size()+", USB device(s) found",Toast.LENGTH_SHORT).show();
         
-        mUsbConnections = new UsbDeviceConnection[deviceList.size()];
+        mUsbConnections = new UsbDeviceConnection[deviceSize];
     	
-    	mUsbIntfs 		= new UsbInterface[deviceList.size()];
-    	Endpoint_outs 	= new UsbEndpoint[deviceList.size()];
-    	Endpoint_ins  	= new UsbEndpoint[deviceList.size()];
+    	mUsbIntfs 		= new UsbInterface[deviceSize];
+    	Endpoint_outs 	= new UsbEndpoint[deviceSize];
+    	Endpoint_ins  	= new UsbEndpoint[deviceSize];
         
         Iterator<UsbDevice> deviceIterator = deviceList.values().iterator();
         
         int index = 0;
         final int u32ProductId = 5802;
         final int u32VendorId  = 1105;
-        
+
         while(deviceIterator.hasNext())
         {
-        	
         	device = deviceIterator.next();
+
         	DeviceInfoString += device.getProductId() + " , " + device.getVendorId()+"\n";
         	if(device.getProductId() == u32ProductId && device.getVendorId() == u32VendorId)
         	{
@@ -229,31 +228,27 @@ public class usbSerialPortManager {
 	            //break;
 	            Log.d("usbManager", device.getDeviceName());
 
-                ///????
-	            if(device != null)
-	            {
-	            	 if(mUsbManager.hasPermission(device))
-	            	 {
-	            		mUsbConnections[index] = mUsbManager.openDevice(device);
-	       
-	                 	if(mUsbConnections[index] == null)
-	                 	{
-	                 		Toast.makeText(context, "UsbConnection is null",Toast.LENGTH_SHORT).show();
-	                 	}
-	                 	else
-	                 	{
-	                 		if(isOurDevice)
-	                 		{
-	                 			SerialSettingInitial(index);
-	                 		}
-	                 	}
-	                 }
-	            	 else
-	                 {
-	                      mUsbManager.requestPermission(device, mPermissionIntent);
-	                 }
+                 if(mUsbManager.hasPermission(device))
+                 {
+                     // Opens the device so it can be used to send and receive data
+                     // return : a UsbDeviceConnection, or null if open failed
+                    mUsbConnections[index] = mUsbManager.openDevice(device);
+
+                    if(mUsbConnections[index] == null)
+                    {
+                        Toast.makeText(context, "UsbConnection is null",Toast.LENGTH_SHORT).show();
+                    }
+                    else
+                    {
+                            SerialSettingInitial(index);
+                    }
+                 }
+                 else
+                 {
+                      mUsbManager.requestPermission(device, mPermissionIntent);
+                 }
 	            
-	            }
+
         	}
         	index++;
         }
@@ -261,7 +256,7 @@ public class usbSerialPortManager {
         
 	}
 	/** ================================================ */
-	public void SendCMD(String s,int index)
+	public boolean SendCMD(String s,int index)
 	{
 		//Log.d("debug", s);
 		if(mUsbConnections[index] != null)
@@ -273,24 +268,20 @@ public class usbSerialPortManager {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
-			int ree = mUsbConnections[index].bulkTransfer(Endpoint_outs[index], bytes, bytes.length, 1000);
-//			for(int i = 0 ; i< bytes.length ;i++)
-//			{
-//				msg +=(char)bytes[i];
-//			}
-//			//msg += "\n recieve:"+ree+",buf:"+Util.toHexString(bytes);
-//			tv.setText(msg);
-			
-			mHandler.removeMessages(Constants.MSG_RECEIVE);
-			//mHandler.removeMessages(Constants.MSG_UPLOAD);
-	    			
-    	    mHandler.sendEmptyMessageDelayed(Constants.MSG_RECEIVE,10);
-    	    //mHandler.sendEmptyMessageDelayed(Constants.MSG_UPLOAD, Integer.valueOf(THLApp.upload_time));
 
+            //Send command to USB.
+            if (bytes != null)
+            {
+                mUsbConnections[index].bulkTransfer(Endpoint_outs[index], bytes, bytes.length, 1000);
+            }
+
+            return true;
      	}
 		else
 		{
 			Toast.makeText(context, "UsbConnection is null",Toast.LENGTH_SHORT).show();
+
+            return false;
 		}
 	}
 	
@@ -302,17 +293,19 @@ public class usbSerialPortManager {
 	/***************** 開始掃瞄 ***********************************************/
     public void startScan(int index)
     {
-    	String HexTime = Integer.toHexString(Integer.valueOf(1000));
-		String StopHexTime = Integer.toHexString(Integer.valueOf(100));
+    	String HexTime = Integer.toHexString(ReceiverScanPeriod);  //milliseconds
+		String StopHexTime = Integer.toHexString(ReceiverStopPeriod);
 		String OutputStirng = "";
+
+        // Command   start_scan 1 ScanTime StopTime.    1 for scanning iBeacon.
 		if(HexTime.length() == 4)    				
-			OutputStirng = "start_scan 3 "+HexTime+" ";
+			OutputStirng = "start_scan 1 "+HexTime+" ";
 		else if(HexTime.length() == 3)
-			OutputStirng = "start_scan 3 0"+HexTime+" ";
+			OutputStirng = "start_scan 1 0"+HexTime+" ";
 		else if(HexTime.length() == 2)
-			OutputStirng = "start_scan 3 00"+HexTime+" ";
+			OutputStirng = "start_scan 1 00"+HexTime+" ";
 		else if(HexTime.length() == 1)
-			OutputStirng = "start_scan 3 000"+HexTime+" ";
+			OutputStirng = "start_scan 1 000"+HexTime+" ";
 		
 		if(StopHexTime.length() == 4)    				
 			OutputStirng = OutputStirng + StopHexTime + "\n";
@@ -322,8 +315,15 @@ public class usbSerialPortManager {
 			OutputStirng = OutputStirng + "00" + StopHexTime + "\n";
 		else if(StopHexTime.length() == 1)
 			OutputStirng = OutputStirng + "000" + StopHexTime + "\n";
-		
-		SendCMD(OutputStirng,index);
+
+        //After send command success, start receiving.
+		if(SendCMD(OutputStirng,index))
+        {
+            mHandler.removeMessages(Constants.MSG_RECOGNIZE_RECEIVER);
+            mHandler.sendEmptyMessage(Constants.MSG_RECOGNIZE_RECEIVER);
+            mHandler.removeMessages(Constants.MSG_RECEIVE);
+            mHandler.sendEmptyMessageDelayed(Constants.MSG_RECEIVE,10);
+        }
     }
     /***************** 停止掃瞄 ***********************************************/
     public void stopScan(int index)
@@ -351,7 +351,7 @@ public class usbSerialPortManager {
     			HexColor+HexBeat+" "+"00\n",index);
     }
     /*******************************************************************************/
-    public int getDeviceSize()
+    int getDeviceSize()
     {
     	return deviceSize;
     }

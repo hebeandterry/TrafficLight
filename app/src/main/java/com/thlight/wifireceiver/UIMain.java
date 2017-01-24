@@ -1,9 +1,14 @@
 package com.thlight.wifireceiver;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.io.Writer;
@@ -13,17 +18,17 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import com.thlight.traffic_light.R;
 
 import android.app.Activity;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
-import android.bluetooth.BluetoothAdapter;
 import android.content.Context;
 import android.content.Intent;
-import android.location.Location;
-import android.location.LocationManager;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
@@ -48,6 +53,9 @@ import android.widget.TextClock;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import android_serialport_api.SerialPort;
+import android_serialport_api.SerialPortFinder;
+
 public class UIMain extends Activity implements View.OnClickListener , UncaughtExceptionHandler{
 
     final int RECORD_VOLUME_FREQUENCY = 1000;
@@ -59,7 +67,7 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
     final int BUFFER_SIZE = AudioRecord.getMinBufferSize(SAMPLE_RATE_IN_HZ,
             AudioFormat.CHANNEL_IN_DEFAULT, AudioFormat.ENCODING_PCM_16BIT);
     AudioRecord mAudioRecord;
-    final float fVolumeLevel1 = 0.1f;                // For setting volume.
+    final float fVolumeLevel1 = 0.2f;                // For setting volume.
     final float fVolumeLevel2 = 0.5f;
     final float fVolumeLevel3 = 1.0f;
     final float fVolumeLevel4 = 1.0f;
@@ -69,6 +77,12 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
     boolean isGetVoiceRun;
     int u32UploadCount = 0;                          //對於多人連線時, 十秒內取最大值
     float fMaxVolume = 0;                            // 十秒內最大的調整音量
+
+    Boolean bShowLightStart = false;
+    ScheduledThreadPoolExecutor exec = new ScheduledThreadPoolExecutor(1);
+    ScheduledFuture<?> scheduledFuture ;   // For cancel the MyTask.
+
+    String Data = "";
 
 	ScrollView sc = null;
 	TextView tv = null;
@@ -132,8 +146,133 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
     
     String str1 = "";
     String str2 = "";
-	
-	Handler mHandler= new Handler()
+
+    class ShowLight implements Runnable {
+
+        @Override
+        public void run() {
+
+            try {
+                light_time = light_time-1;
+
+                //Show light time on the screen.
+                runOnUiThread(new Runnable() {
+                    public void run() {
+
+                        if(light_time == 0 || light_time < 0)
+                        {
+                            sp.setRate(sp_Id, 1.0f);
+                            isRed = !isRed;
+                            if(isRed)
+                            {
+                                light_time = Integer.valueOf(THLApp.red_light);
+                                tv_green.setBackgroundResource(R.drawable.gray_light);
+                                tv_green.setText("");
+                                tv_red.setBackgroundResource(R.drawable.red_light);
+                            }
+                            else
+                            {
+                                light_time = Integer.valueOf(THLApp.green_light);
+                                tv_green.setBackgroundResource(R.drawable.green_light);
+                                tv_red.setBackgroundResource(R.drawable.gray_light);
+                                tv_red.setText("");
+                            }
+                        }
+
+                        if(isRed)
+                            tv_red.setText(""+light_time);
+                        else
+                            tv_green.setText(""+light_time);
+
+                        tv.setText("time:"+light_time);
+                    }
+                });
+
+                String OutputString = "";
+                String LightHexTime = "";
+
+                String number = Integer.toHexString((Integer.valueOf(THLApp.number)));
+
+                // 紅綠燈編號要補成 4 bytes. (Major 位置)
+                if(number.length() == 3)
+                    number = "0"+number;
+                else if(number.length() == 2)
+                    number = "00"+number;
+                else if(number.length() == 1)
+                    number = "000"+number;
+
+                //Volume 設成 reference RSSI (2 bytes).
+                String sVolume = Integer.toHexString(((int) (THLApp.volume * 10)));
+                Log.d("debug", "sVolume: " + sVolume + " THLApp.volume : " + THLApp.volume);
+                if(sVolume.length() == 1)
+                {
+                    sVolume = "0"+ sVolume;
+                }
+
+                    /*Green light*/
+                if(!isRed)
+                {
+                    LightHexTime = Integer.toHexString(light_time + 1*256);//綠燈 = 256 + 現在的倒數時間
+
+                    if(LightHexTime.length() == 4)
+                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" "+LightHexTime+" "+sVolume+"\n";
+                    else if(LightHexTime.length() == 3)
+                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 0"+LightHexTime+" "+sVolume+"\n";
+                    else if(LightHexTime.length() == 2)
+                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 00"+LightHexTime+" "+sVolume+"\n";
+                    else if(LightHexTime.length() == 1)
+                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 000"+LightHexTime+" "+sVolume+"\n";
+                }
+                else {
+
+                    LightHexTime = Integer.toHexString(light_time + 2*256);//紅燈 = 2*256 + 現在的倒數時間
+
+                    if(LightHexTime.length() == 4)
+                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" "+LightHexTime+" "+sVolume+"\n";
+                    else if(LightHexTime.length() == 3)
+                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 0"+LightHexTime+" "+sVolume+"\n";
+                    else if(LightHexTime.length() == 2)
+                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 00"+LightHexTime+" "+sVolume+"\n";
+                    else if(LightHexTime.length() == 1)
+                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 000"+LightHexTime+" "+sVolume+"\n";
+                }
+
+                if(light_time <= 5 && !isRed)
+                {
+                    mp.start();
+                }
+                else if(light_time%2 == 0 && !isRed)
+                {
+                    mp.start();
+                }
+                //Log.d("debug", "isRed:"+isRed + "time:"+light_time);
+
+                //Log.d("debug", "usbSerialPortManager.aIsReceiver[0]: " + usbSerialPortManager.aIsReceiver[0] +
+                //              " usbSerialPortManager.aIsReceiver[1]:" + usbSerialPortManager.aIsReceiver[1]);
+                Log.d("debug", "OutputString : " + OutputString);
+                // Send command to Beacon.
+                for (int i = 0; i< usbSerialPortManager.getDeviceSize(); i++)
+                {
+                    if (!com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[i])
+                    {
+                        usbSerialPortManager.SendCMD(OutputString, i);
+                    }
+                }
+
+            }
+            catch (Throwable e)
+            {
+                Log.d("debug", "Show Light fail.");
+            }
+
+        }
+
+
+    }
+
+
+
+    Handler mHandler= new Handler()
 	{
 		@Override
 		public void handleMessage(Message msg)
@@ -142,11 +281,42 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
 			{
                 /*Get the data from the receiver continually.*/
 				case Constants.MSG_RECEIVE:
+
+                    for (int i =0; i< usbSerialPortManager.getDeviceSize(); i++)
+                    {
+                        Log.d("5566", "aIsReceiver[" + i+ "] : " + com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[i]);
+                        if (com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[i])
+                        {
+                            final int finalI = i;
+                            new Thread(new Runnable() {
+                                public void run() {
+                                    byte[] buf = new byte[2000];
+                                    int re = usbSerialPortManager.getSerialPortData(buf, finalI);
+
+                                    if(re != -1)
+                                    {
+                                        for(int j = 0 ; j< re ;j++)
+                                        {
+                                            str1 +=(char)buf[j];
+                                        }
+
+                                        if(MessageString.length()<500000)
+                                            MessageString = MessageString + new String(str1);
+                                            //Log.d("usbManager", "usb1:true"+","+MessageString.length());
+                                    }
+                                    str1 = "";
+                                    buf = null;
+
+                                }
+                            }).start();
+                        }
+                    }
 //					if(usbSerialPortManager.isReceiver[0])
 //					{
+                    /*
 						new Thread(new Runnable() {
 							public void run() {
-								byte[] buf = new byte[2000]; 
+								byte[] buf = new byte[2000];
 								int re = usbSerialPortManager.getSerialPortData(buf,0);
 						
 								if(re != -1)
@@ -154,20 +324,18 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
 									for(int i = 0 ; i< re ;i++)
 									{
 										str1 +=(char)buf[i];
-									}								
-									//Log.d("debug", "re:"+re+","+new String(str1));
+									}
 									//tv.setText(MessageString);
 									if(isReceiver(str1))
 									{
 										if(MessageString.length()<500000)
 											MessageString = MessageString + new String(str1);
 										//Log.d("usbManager", "usb1:true"+","+MessageString.length());
-										usbSerialPortManager.aIsReceiver[0] = true;
+										com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[0] = true;
 									}
 									else
 									{
-		//								MessageString = "";
-										usbSerialPortManager.aIsReceiver[0] = false;
+										com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[0] = false;
 										Log.d("usbManager", "usb1:false");
 									}
 								}
@@ -193,21 +361,19 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
 										{
 											str2 +=(char)buf_2[i];
 										}
-										
-										//Log.d("debug", "re2:"+re_2+","+new String(str2));
+
 										//tv.setText(MessageString);
 										if(isReceiver(str2))
 										{
 											if(MessageString.length()<500000)
 												MessageString = MessageString + new String(str2);
 											
-											usbSerialPortManager.aIsReceiver[0] = true;
+											com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[1] = true;
 											//Log.d("usbManager", "usb2:true"+","+MessageString.length());
 										}
 										else
 										{
-		//									MessageString = "";
-											usbSerialPortManager.aIsReceiver[1] = false;
+											com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[1] = false;
 											Log.d("usbManager", "usb2:false");
 										}
 									}	
@@ -217,7 +383,7 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
 							}
 						}).start();
 //					}
-				
+				*/
 					mHandler.sendEmptyMessageDelayed(Constants.MSG_RECEIVE, RECEIVE_FREQUENCY);
 					break;
 				case Constants.MSG_CONNECT_SUCCESS:
@@ -225,111 +391,17 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
 					break;			
 				case Constants.MSG_SHOW_LIGHT:
 					Log.d("debug", "Enter MSG_SHOW_LIGHT");
-					light_time = light_time-1;
-					
-					if(light_time == 0 || light_time < 0)
-					{
-						sp.setRate(sp_Id, 1.0f);
-						isRed = !isRed;
-						if(isRed)
-						{
-							light_time = Integer.valueOf(THLApp.red_light);
-							tv_green.setBackgroundResource(R.drawable.gray_light);
-							tv_green.setText("");
-							tv_red.setBackgroundResource(R.drawable.red_light);
-						}
-						else
-						{
-							light_time = Integer.valueOf(THLApp.green_light);
-							tv_green.setBackgroundResource(R.drawable.green_light);
-							tv_red.setBackgroundResource(R.drawable.gray_light);
-							tv_red.setText("");
-						}
-					}
-					
-					String OutputString = "";
-					String LightHexTime = "";
-					
-					String number = Integer.toHexString((Integer.valueOf(THLApp.number)));
 
-                    // 紅綠燈編號要補成 4 bytes. (Major 位置)
-    		 		if(number.length() == 3)
-    		 			number = "0"+number;
-    		 		else if(number.length() == 2)
-    		 			number = "00"+number;
-    		 		else if(number.length() == 1)
-    		 			number = "000"+number;
-
-					//Volume 設成 reference RSSI (2 bytes).
-                    String sVolume = Integer.toHexString(((int) (THLApp.volume * 10)));
-                    Log.d("debug", "sVolume: " + sVolume + " THLApp.volume : " + THLApp.volume);
-                    if(sVolume.length() == 1)
-                    {
-                        sVolume = "0"+ sVolume;
-                    }
-
-                    /*Green light*/
-					if(!isRed)
-					{
-						LightHexTime = Integer.toHexString(light_time + 1*256);//綠燈 = 256 + 現在的倒數時間
-						
-	    		 		if(LightHexTime.length() == 4)
-                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" "+LightHexTime+" "+sVolume+"\n";
-	    				else if(LightHexTime.length() == 3)
-                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 0"+LightHexTime+" "+sVolume+"\n";
-	    				else if(LightHexTime.length() == 2)
-                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 00"+LightHexTime+" "+sVolume+"\n";
-	    				else if(LightHexTime.length() == 1)
-                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 000"+LightHexTime+" "+sVolume+"\n";
-					}
-					else {
-
-						LightHexTime = Integer.toHexString(light_time + 2*256);//紅燈 = 2*256 + 現在的倒數時間
-						
-	    		 		if(LightHexTime.length() == 4)
-                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" "+LightHexTime+" "+sVolume+"\n";
-	    				else if(LightHexTime.length() == 3)
-                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 0"+LightHexTime+" "+sVolume+"\n";
-	    				else if(LightHexTime.length() == 2)
-                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 00"+LightHexTime+" "+sVolume+"\n";
-	    				else if(LightHexTime.length() == 1)
-                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 000"+LightHexTime+" "+sVolume+"\n";
-					}
-					
-    		 		if(isRed)
-    		 			tv_red.setText(""+light_time);
-    		 		else
-    		 			tv_green.setText(""+light_time);
-    		 		
-					tv.setText("time:"+light_time);
-					
-					if(light_time <= 5 && !isRed)
-					{
-						mp.start();
-					}
-					else if(light_time%2 == 0 && !isRed)
-					{					
-						mp.start();
-					}
-					//Log.d("debug", "isRed:"+isRed + "time:"+light_time);
-					mHandler.removeMessages(Constants.MSG_SHOW_LIGHT);
-					mHandler.sendEmptyMessageDelayed(Constants.MSG_SHOW_LIGHT,1000);
-
-                    //Log.d("debug", "usbSerialPortManager.aIsReceiver[0]: " + usbSerialPortManager.aIsReceiver[0] +
-                     //              " usbSerialPortManager.aIsReceiver[1]:" + usbSerialPortManager.aIsReceiver[1]);
-                    Log.d("debug", "OutputString : " + OutputString);
-                    // Send command to Beacon.
-                    if (usbSerialPortManager.getDeviceSize() >1) {
-                        if (!usbSerialPortManager.aIsReceiver[1]) {
-                            usbSerialPortManager.SendCMD(OutputString, 1);
-                        }
+                    if (bShowLightStart == false) {
+                        // Start upload task repeatedly  every THLApp.upload_time.
+                        //ScheduledThreadPoolExecutor exec = new ScheduledThreadPoolExecutor(1);
+                        long period = 1000; //1000; // the period between successive executions
+                        scheduledFuture = exec.scheduleAtFixedRate(new ShowLight(), period, period, TimeUnit.MILLISECONDS);
+                        bShowLightStart = true;
                     }
                     else
                     {
-                        if(!usbSerialPortManager.aIsReceiver[0])
-                        {
-                            usbSerialPortManager.SendCMD(OutputString,0);
-                        }
+                        //do nothing.
                     }
 
 					break;
@@ -350,6 +422,12 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
                     {
                         // Restart to record the audio volume.
                         StartRecordAudioVolume();
+
+                        if (THLApp.DEMO == true && bShowLightStart == false)
+                        {
+                            scheduledFuture = exec.scheduleAtFixedRate(new ShowLight(), 1000, 1000, TimeUnit.MILLISECONDS);
+                            bShowLightStart = true;
+                        }
                     }
                     else
                     {
@@ -384,6 +462,10 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
                                 tv_green.setBackgroundResource(R.drawable.green_light);
                                 tv_red.setBackgroundResource(R.drawable.gray_light);
                                 tv_red.setText("");
+
+                                scheduledFuture.cancel(false);
+                                bShowLightStart = false;
+                                //scheduledFuture = exec.scheduleAtFixedRate(new ShowLight(), 1000, 1000, TimeUnit.MILLISECONDS);
                             }
                         }
                     }
@@ -414,9 +496,101 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
 					}
 					mHandler.sendEmptyMessageDelayed(Constants.MSG_DELETE_AW_FILE, 3600000);
 					break;
+                //記錄哪根是 receiver, beacon.
+                case Constants.MSG_RECOGNIZE_RECEIVER:
+
+                    for (int i = 0; i<usbSerialPortManager.getDeviceSize(); i++)
+                    {
+                        byte[] buf = new byte[2000];
+                        int re = usbSerialPortManager.getSerialPortData(buf, i);
+
+                        if(re != -1)
+                        {
+                            for(int j = 0 ; j< re ;j++)
+                            {
+                                str1 +=(char)buf[j];
+                            }
+                            //tv.setText(MessageString);
+                            //看是否有 command not found 字眼
+                            if(isReceiver(str1))
+                            {
+                                if(MessageString.length()<500000)
+                                    MessageString = MessageString + new String(str1);
+                                //Log.d("usbManager", "usb1:true"+","+MessageString.length());
+                                com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[i] = true;
+                            }
+                            else
+                            {
+                                com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[i] = false;
+                                Log.d("usbManager", "usb1:false");
+                            }
+                        }
+                        str1 = "";
+                        buf = null;
+                    }
+                    break;
+                case Constants.test:
+
+                    SerialPortFinder abc = new SerialPortFinder();
+                    String[] hebe = abc.getAllDevices();
+
+                    for (int i =0; i< hebe.length; i++)
+                    {
+                        Log.d("5566", "hebe[" + i +"] :" + hebe[i]);
+                    }
+
+                    try {
+                        spp = new SerialPort(new File("/dev/ttyS0"),115200, 0);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+
+                    mOutputStream=spp.getOutputStream();//(FileOutputStream) spp.getOutputStream();
+                    mInputStream=spp.getInputStream();//(FileInputStream) spp.getInputStream();
+
+                    try {
+                        mOutputStream.write("hebe".getBytes());
+                        mOutputStream.write("\n".getBytes());
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+
+
+                    new Thread(new Runnable() {
+                        @Override
+                        public void run() {
+
+                            for (int i = 0; i<1000; i++)
+                            {
+                                int size = 0;
+
+                                Log.d("5566", "size: " + size);
+                                byte[] buffer = new byte[64];
+                                //if (mInputStream == null) return;
+                                try {
+                                    size = mInputStream.read(buffer);
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                }
+                                Log.d("5566", "size: " + size);
+                                if (size > 0) {
+                                    onDataReceived(buffer, size);
+                                }
+
+                            }
+                        }
+                    }).start();
+
+                    break;
 			}
 		}
 	};
+
+    SerialPort spp ;
+    InputStream mInputStream;
+
+    OutputStream mOutputStream;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -525,19 +699,86 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
         StartRecordAudioVolume();  // 取得背景音量
         /*======================================================================*/
 
+        Log.d("5566", "Start");
+        //mHandler.sendEmptyMessageDelayed(Constants.test, 10000);
+        //mHandler.sendEmptyMessage(Constants.test);
 
+        SerialPortFinder abc = new SerialPortFinder();
+        String[] hebe = abc.getAllDevices();
+
+        for (int i =0; i< hebe.length; i++)
+        {
+            Log.d("5566", "hebe[" + i +"] :" + hebe[i]);
+        }
+        Process su;
+        DataOutputStream opt = null;
+        //su = Runtime.getRuntime().exec("su");
+
+        // Log.d("5566", "p.exitValue() : " + su.exitValue());
+
+/*
+        try {
+            spp = new SerialPort(new File("/dev/ttyS0"),115200, 0);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        mOutputStream=spp.getOutputStream();//(FileOutputStream) spp.getOutputStream();
+        mInputStream=spp.getInputStream();//(FileInputStream) spp.getInputStream();
+
+        try {
+            mOutputStream.write("hebe".getBytes());
+            mOutputStream.write("\n".getBytes());
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+
+                for (int i = 0; i<1000; i++)
+                {
+                    int size = 0;
+
+                    Log.d("5566", "size: " + size);
+                    byte[] buffer = new byte[64];
+                    //if (mInputStream == null) return;
+                    try {
+                        size = mInputStream.read(buffer);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    Log.d("5566", "size: " + size);
+                    if (size > 0) {
+                        onDataReceived(buffer, size);
+                    }
+
+                }
+            }
+        }).start();
+*/
         //TestLED is a thread.
 //        TestLED testLED = new TestLED();
 //        testLED.start();
 
     }
+
+    void onDataReceived(final byte[] buffer, final int size) {
+
+                    Data = (new String(buffer, 0, size));
+                Log.d("5566", "Data : " + Data);
+
+    }
+
     /** ================================================ */
     /*It will go to onResume every time opening APP.*/
    	@Override
    	public void onResume()
 	{
 		super.onResume();
-		usbSerialPortManager.USBintial();
+		usbSerialPortManager.USBInitial();
 		//Log.d("debug", "onResume");
 	}
     /** ================================================ */
@@ -560,6 +801,8 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
 		mHandler.removeMessages(Constants.MSG_SHOW_TIME);
 		mHandler.removeMessages(Constants.MSG_DELETE_AW_FILE);
         isGetVoiceRun = false;
+        bShowLightStart = false;
+        scheduledFuture.cancel(false);        //Cancel show light.
 		System.exit(0);
 	}
 	
@@ -626,8 +869,7 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
     		 			number = "00"+number;
     		 		else if(number.length() == 1)
     		 			number = "000"+number;
-    
-    		 		
+
     		 		if(GreenLightHexTime.length() == 4)
                         OutputString = THLApp.SET_INFO_COMMAND + " " +number+" "+ GreenLightHexTime+" "+red_time+"\n";
     				else if(GreenLightHexTime.length() == 3)
@@ -639,13 +881,13 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
 
                     // Send command to Beacon.
     		 		if (usbSerialPortManager.getDeviceSize() >1) {
-                        if (!usbSerialPortManager.aIsReceiver[1]) {
+                        if (!com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[1]) {
                             usbSerialPortManager.SendCMD(OutputString, 1);
                         }
                     }
                     else
                     {
-                        if(!usbSerialPortManager.aIsReceiver[0])
+                        if(!com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[0])
                         {
                             usbSerialPortManager.SendCMD(OutputString,0);
                         }
@@ -655,7 +897,10 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
     				tv_red.setBackgroundResource(R.drawable.gray_light);
     				
     				isRed = false;
-    				
+
+                    //Stop show light thread at first.
+                    bShowLightStart = false;
+                    scheduledFuture.cancel(false);
     				mHandler.removeMessages(Constants.MSG_SHOW_LIGHT);
     				mHandler.sendEmptyMessageDelayed(Constants.MSG_SHOW_LIGHT,1000);
     				
@@ -1084,21 +1329,13 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
 	/*************************************************/
 	public boolean isReceiver(String str)
 	{
-		if(str.contains("command not found"))
-		{
-			return false;
-		}
-		return true;
-	}
+        return !str.contains("command not found");
+    }
 	/***************************************/
 	private boolean isMac(String val) {  
         String trueMacAddress = "([A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}";  
         // 这是真正的MAV地址；正则表达式；  
-        if (val.matches(trueMacAddress)) {  
-            return true;  
-        } else {  
-            return false;  
-        }  
+        return val.matches(trueMacAddress);
     }
 //	/**======================================================================================
 //	 * @throws JSONException */
