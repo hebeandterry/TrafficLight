@@ -4,9 +4,11 @@ import java.io.File;
 import java.util.regex.Pattern;
 
 import android.app.Application;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Environment;
 import android.preference.PreferenceManager;
+import android.util.Log;
 import android.widget.Toast;
 
 
@@ -27,7 +29,9 @@ public class THLApp extends Application
     
     public static String STORE_PATH	 = Environment.getExternalStorageDirectory().toString()+ "/Traffic Light/";
 	public static String SET_INFO_COMMAND = "set_beacon_info E2C56DB5-DFFB-48D2-B060-D0F5A71096E1";
-    public static String UUID = "436DFAB4-03AF-4F10-A039-4503BB94BD56";
+    public static String RECEIVE_UUID = "436DFAB4-03AF-4F10-A039-4503BB94BD56";
+	public static String SET_KEEP_SETTING = "set_keep_setting 0 \n";
+    public static String GET_KEEP_SETTING = "get_keep_setting \n";
      
 	/** ========================================================== */
 	public THLApp()
@@ -50,6 +54,8 @@ public class THLApp extends Application
 			}
 		}
 		loadSettings();
+
+        startService(new Intent(this, CheckService.class));  //Start APP when APP is closed accidentally.
 	}
 
 	/** ========================================================== */
