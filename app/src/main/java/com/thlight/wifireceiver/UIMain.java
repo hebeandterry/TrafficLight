@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.DataOutputStream;
 import java.io.File;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
@@ -18,11 +19,14 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.List;
+import java.util.Scanner;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-import com.thlight.traffic_light.R;
 
 import android.app.Activity;
 import android.app.AlarmManager;
@@ -53,34 +57,58 @@ import android.widget.TextClock;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.android.things.pio.PeripheralManagerService;
+
 import android_serialport_api.SerialPort;
 import android_serialport_api.SerialPortFinder;
 
 public class UIMain extends Activity implements View.OnClickListener , UncaughtExceptionHandler{
 
-    final int RECORD_VOLUME_FREQUENCY = 1000;
-    final int CHANGE_VOLUME_FREQUENCY = 10000;     //10S
-    final int RECEIVE_FREQUENCY          = 40;        //0.04S
-    final int UPLOAD_FREQUENCY           = 2000;      //2S
-    final double EXTREMELY_VALUE_RANGE = 0.1;      //10% for up and down
-    final int SAMPLE_RATE_IN_HZ = 8000;
+    /*====================================================================*/
+    final String UART_PATH1                           = "/dev/ttyS2";
+    final String UART_PATH2                           = "/dev/ttyS3";
+    final int BAUD_RATE                               = 115200;
+    final int RECORD_VOLUME_FREQUENCY            = 1000;       // 1S  記錄背景聲音的頻率
+    final int CHANGE_VOLUME_FREQUENCY            = 1;         //  根據背景音量而改變聲音 的頻率 (以紅綠燈變化一次為一週期)
+    final int REFERENCE_TIMES                         = 3;          // 在 CHANGE_VOLUME_FREQUENCY 內會去取 3 次的聲音平均
+    final int RECEIVE_FREQUENCY                      = 40;        //0.04S
+    final int UPLOAD_FREQUENCY                      = 2000;      //2S
+    final double EXTREMELY_VALUE_RANGE            = 0.1;      //10% for up and down
+    final int SHOW_LIGHT_FREQUENCY                 = 1000;      //每秒改變號誌秒數   //test
+    final int GREEN_LIGHT_ENDING                     = 15;        //當綠燈剩 15秒時, 提示音每秒都響
+    final int SAMPLE_RATE_IN_HZ                       = 8000;
     final int BUFFER_SIZE = AudioRecord.getMinBufferSize(SAMPLE_RATE_IN_HZ,
             AudioFormat.CHANNEL_IN_DEFAULT, AudioFormat.ENCODING_PCM_16BIT);
     AudioRecord mAudioRecord;
+    final int UPLOAD_TURNS                             = 5;       //To reset u32UploadCount and fMaxVolume every 5 upload times.
+
     final float fVolumeLevel1 = 0.2f;                // For setting volume.
     final float fVolumeLevel2 = 0.5f;
-    final float fVolumeLevel3 = 1.0f;
+    final float fVolumeLevel3 = 0.8f;
     final float fVolumeLevel4 = 1.0f;
 
-    final int u32BgNoiseLevel1 = 58;
-    final int u32BgNoiseLevel2 = 65;
-    boolean isGetVoiceRun;
-    int u32UploadCount = 0;                          //對於多人連線時, 十秒內取最大值
-    float fMaxVolume = 0;                            // 十秒內最大的調整音量
+    final int u32BgNoiseLevel1 = 65;
+    final int u32BgNoiseLevel2 = 75;
+    boolean isGetVoiceRun     = false;
+    int u32UploadCount        = 0;                          //對於多人連線時, 十秒內取最大值
+    float fMaxVolume          = 0;                            // 十秒內最大的調整音量
+    int u32RedTime = 0;
+    int u32GreenTime = 0;
+    int u32PreRedTime = 0;
+    int u32PreGreenTime = 0;
+    Timer GT = new Timer();
+    Timer RT = new Timer();
+    boolean GTPause = true;
+    boolean RTPause = true;
+    boolean bFirstRound = true;
+    ArrayList<Double> aAverageVolume = new ArrayList<Double>();      // Declare a array to record the average volume.
+    ArrayList<Integer> aReceiverRecord = new ArrayList<Integer>();    //記錄 receiver 是在哪個USB位置
 
-    Boolean bShowLightStart = false;
+    Boolean bShowLightStart = false;        //The show light status.
     ScheduledThreadPoolExecutor exec = new ScheduledThreadPoolExecutor(1);
-    ScheduledFuture<?> scheduledFuture ;   // For cancel the MyTask.
+    ScheduledFuture<?> scheduledFuture ;   // For cancel the ShowLight task.
+    Boolean bAudioOn = true;
+    double dVolumeAverage = 0;
 
     String Data = "";
 
@@ -153,124 +181,171 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
         public void run() {
 
             try {
-                light_time = light_time-1;
-
-                //Show light time on the screen.
-                runOnUiThread(new Runnable() {
-                    public void run() {
-
-                        if(light_time == 0 || light_time < 0)
-                        {
-                            sp.setRate(sp_Id, 1.0f);
-                            isRed = !isRed;
-                            if(isRed)
-                            {
-                                light_time = Integer.valueOf(THLApp.red_light);
-                                tv_green.setBackgroundResource(R.drawable.gray_light);
-                                tv_green.setText("");
-                                tv_red.setBackgroundResource(R.drawable.red_light);
-                            }
-                            else
-                            {
-                                light_time = Integer.valueOf(THLApp.green_light);
-                                tv_green.setBackgroundResource(R.drawable.green_light);
-                                tv_red.setBackgroundResource(R.drawable.gray_light);
-                                tv_red.setText("");
-                            }
-                        }
-
-                        if(isRed)
-                            tv_red.setText(""+light_time);
-                        else
-                            tv_green.setText(""+light_time);
-
-                        tv.setText("time:"+light_time);
-                    }
-                });
 
                 String OutputString = "";
-                String LightHexTime = "";
 
-                String number = Integer.toHexString((Integer.valueOf(THLApp.number)));
+                /*Counting the traffic time.*/
+                if (!GTPause)
+                    u32GreenTime++;
+                if (!RTPause)
+                    u32RedTime++;
+                /*
+                int A = -1;
+                FileReader gpioExport;
+                gpioExport = new FileReader("/sys/class/gpio_sw/PA16/data");
+                //A = gpioExport.read();
+                gpioExport.close();
+                */
+/*
+                Scanner scanner = new Scanner(new File("/sys/class/gpio_sw/PA20/data"));
 
-                // 紅綠燈編號要補成 4 bytes. (Major 位置)
-                if(number.length() == 3)
-                    number = "0"+number;
-                else if(number.length() == 2)
-                    number = "00"+number;
-                else if(number.length() == 1)
-                    number = "000"+number;
-
-                //Volume 設成 reference RSSI (2 bytes).
-                String sVolume = Integer.toHexString(((int) (THLApp.volume * 10)));
-                Log.d("debug", "sVolume: " + sVolume + " THLApp.volume : " + THLApp.volume);
-                if(sVolume.length() == 1)
+                if (scanner.nextInt() == 1)
                 {
-                    sVolume = "0"+ sVolume;
+                    THLApp.bEastWest = true;
                 }
-
-                    /*Green light*/
-                if(!isRed)
+                else
                 {
-                    LightHexTime = Integer.toHexString(light_time + 1*256);//綠燈 = 256 + 現在的倒數時間
-
-                    if(LightHexTime.length() == 4)
-                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" "+LightHexTime+" "+sVolume+"\n";
-                    else if(LightHexTime.length() == 3)
-                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 0"+LightHexTime+" "+sVolume+"\n";
-                    else if(LightHexTime.length() == 2)
-                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 00"+LightHexTime+" "+sVolume+"\n";
-                    else if(LightHexTime.length() == 1)
-                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 000"+LightHexTime+" "+sVolume+"\n";
-                }
-                else {
-
-                    LightHexTime = Integer.toHexString(light_time + 2*256);//紅燈 = 2*256 + 現在的倒數時間
-
-                    if(LightHexTime.length() == 4)
-                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" "+LightHexTime+" "+sVolume+"\n";
-                    else if(LightHexTime.length() == 3)
-                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 0"+LightHexTime+" "+sVolume+"\n";
-                    else if(LightHexTime.length() == 2)
-                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 00"+LightHexTime+" "+sVolume+"\n";
-                    else if(LightHexTime.length() == 1)
-                        OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 000"+LightHexTime+" "+sVolume+"\n";
+                    THLApp.bEastWest = false;
                 }
 
-                if(light_time <= 5 && !isRed)
+                scanner = new Scanner(new File("/sys/class/gpio_sw/PA21/data"));
+
+                if (scanner.nextInt() == 1)
                 {
-                    mp.start();
+                    THLApp.bSouthNorth = true;
+                    //isRed = true;
                 }
-                else if(light_time%2 == 0 && !isRed)
+                else
                 {
-                    mp.start();
+                    THLApp.bSouthNorth = false;
+                    //isRed = false;
                 }
+*/
+
+                //After know the traffic time at first round, start to show light time.
+                if (!bFirstRound)
+                {
+                    light_time = light_time-1;
+
+                    //Show light time on the screen.
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+
+                            if(light_time == 0 || light_time < 0)
+                            {
+                                sp.setRate(sp_Id, 1.0f);
+                                isRed = !isRed;
+                                if(isRed)
+                                {
+                                    //light_time = Integer.valueOf(THLApp.red_light);
+                                    light_time = u32PreRedTime;
+                                    tv_green.setBackgroundResource(R.drawable.gray_light);
+                                    tv_green.setText("");
+                                    tv_red.setBackgroundResource(R.drawable.red_light);
+                                }
+                                else
+                                {
+                                    //light_time = Integer.valueOf(THLApp.green_light);
+                                    light_time = u32PreGreenTime;
+                                    tv_green.setBackgroundResource(R.drawable.green_light);
+                                    tv_red.setBackgroundResource(R.drawable.gray_light);
+                                    tv_red.setText("");
+                                }
+                            }
+
+                            if(isRed)
+                                tv_red.setText(""+light_time);
+                            else
+                                tv_green.setText(""+light_time);
+
+                            tv.setText("time:"+light_time);
+                        }
+                    });
+
+                    String LightHexTime = "";
+
+                    String number = Integer.toHexString((Integer.valueOf(THLApp.number)));
+
+                    // 紅綠燈編號要補成 4 bytes. (Major 位置)
+                    if(number.length() == 3)
+                        number = "0"+number;
+                    else if(number.length() == 2)
+                        number = "00"+number;
+                    else if(number.length() == 1)
+                        number = "000"+ number;//(int) dVolumeAverage;
+
+                /*========Chang the ref RSSI will change the value of RSSI.==================================================*/
+                    //Volume 設成 reference RSSI (2 bytes).
+                    String sVolume = Integer.toHexString(((int) (THLApp.volume * 10)));
+                    Log.d("debug", "sVolume: " + sVolume + " THLApp.volume : " + THLApp.volume);
+                    if(sVolume.length() == 1)
+                    {
+                        sVolume = "0"+ sVolume;
+                    }
+                /*==========Chang the ref RSSI will change the value of RSSI.================================================*/
+
+                    /*Green light.  Minor is light time.*/
+                    if(!isRed)
+                    {
+                        LightHexTime = Integer.toHexString(light_time + 1*256);//綠燈 = 256 + 現在的倒數時間
+
+                        if(LightHexTime.length() == 4)
+                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" "+LightHexTime+" "+THLApp.REF_RSSI+"\n";
+                        else if(LightHexTime.length() == 3)
+                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 0"+LightHexTime+" "+THLApp.REF_RSSI+"\n";
+                        else if(LightHexTime.length() == 2)
+                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 00"+LightHexTime+" "+THLApp.REF_RSSI+"\n";
+                        else if(LightHexTime.length() == 1)
+                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 000"+LightHexTime+" "+THLApp.REF_RSSI+"\n";
+                    }
+                    else {
+                        LightHexTime = Integer.toHexString(light_time + 2*256);//紅燈 = 2*256 + 現在的倒數時間
+
+                        if(LightHexTime.length() == 4)
+                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" "+LightHexTime+" "+THLApp.REF_RSSI+"\n";
+                        else if(LightHexTime.length() == 3)
+                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 0"+LightHexTime+" "+THLApp.REF_RSSI+"\n";
+                        else if(LightHexTime.length() == 2)
+                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 00"+LightHexTime+" "+THLApp.REF_RSSI+"\n";
+                        else if(LightHexTime.length() == 1)
+                            OutputString = THLApp.SET_INFO_COMMAND + " " +number+" 000"+LightHexTime+" "+THLApp.REF_RSSI+"\n";
+                    }
+
+                    if(light_time <= GREEN_LIGHT_ENDING && !isRed && bAudioOn)
+                    {
+                        mp.start();
+                    }
+                    else if(light_time%2 == 0 && !isRed && bAudioOn)
+                    {
+                        mp.start();
+                    }
+                }
+
                 //Log.d("debug", "isRed:"+isRed + "time:"+light_time);
 
-                //Log.d("debug", "usbSerialPortManager.aIsReceiver[0]: " + usbSerialPortManager.aIsReceiver[0] +
-                //              " usbSerialPortManager.aIsReceiver[1]:" + usbSerialPortManager.aIsReceiver[1]);
-                Log.d("debug", "OutputString : " + OutputString);
+                //Log.d("debug", "OutputString : " + OutputString);
                 // Send command to Beacon.
                 for (int i = 0; i< usbSerialPortManager.getDeviceSize(); i++)
                 {
-                    if (!com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[i])
-                    {
+                    if (!com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[i]) {
+                        Log.d("debug", "bEastWest: " + THLApp.bEastWest + " bSouthNorth: " + THLApp.bSouthNorth + " OutputString : " + OutputString);
                         usbSerialPortManager.SendCMD(OutputString, i);
+                        //usbSerialPortManager.SendCMD(THLApp.GET_KEEP_SETTING, i);
+
+                        //Check GPIO
+
+                        CheckGPIO(i);
                     }
                 }
+
 
             }
             catch (Throwable e)
             {
                 Log.d("debug", "Show Light fail.");
             }
-
         }
-
-
     }
-
-
 
     Handler mHandler= new Handler()
 	{
@@ -282,16 +357,15 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
                 /*Get the data from the receiver continually.*/
 				case Constants.MSG_RECEIVE:
 
-                    for (int i =0; i< usbSerialPortManager.getDeviceSize(); i++)
+                    // Create threads for each receiver to get data from receiver.
+                    for (int i =0; i< aReceiverRecord.size(); i++)
                     {
-                        Log.d("5566", "aIsReceiver[" + i+ "] : " + com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[i]);
-                        if (com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[i])
-                        {
-                            final int finalI = i;
-                            new Thread(new Runnable() {
+                        //Log.d("5566", "aIsReceiver[" + aReceiverRecord.get(i)+ "] : " + com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[aReceiverRecord.get(i)]);
+                        final int finalI = i;
+                        new Thread(new Runnable() {
                                 public void run() {
                                     byte[] buf = new byte[2000];
-                                    int re = usbSerialPortManager.getSerialPortData(buf, finalI);
+                                    int re = usbSerialPortManager.getSerialPortData(buf, aReceiverRecord.get(finalI));
 
                                     if(re != -1)
                                     {
@@ -303,114 +377,51 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
                                         if(MessageString.length()<500000)
                                             MessageString = MessageString + new String(str1);
                                             //Log.d("usbManager", "usb1:true"+","+MessageString.length());
+
+                                        if(finalI == 0)
+                                        {
+                                           // Log.d("hebe1", "str: " + str1);
+                                        }
+                                        else
+                                        {
+                                            //Log.d("hebe2", "str1: " + str1);
+                                        }
+
                                     }
                                     str1 = "";
                                     buf = null;
 
                                 }
                             }).start();
-                        }
                     }
-//					if(usbSerialPortManager.isReceiver[0])
-//					{
-                    /*
-						new Thread(new Runnable() {
-							public void run() {
-								byte[] buf = new byte[2000];
-								int re = usbSerialPortManager.getSerialPortData(buf,0);
-						
-								if(re != -1)
-								{
-									for(int i = 0 ; i< re ;i++)
-									{
-										str1 +=(char)buf[i];
-									}
-									//tv.setText(MessageString);
-									if(isReceiver(str1))
-									{
-										if(MessageString.length()<500000)
-											MessageString = MessageString + new String(str1);
-										//Log.d("usbManager", "usb1:true"+","+MessageString.length());
-										com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[0] = true;
-									}
-									else
-									{
-										com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[0] = false;
-										Log.d("usbManager", "usb1:false");
-									}
-								}
-								str1 = "";
-								buf = null;
-								
-							}
-						}).start();
-//					}
-					
-//					if(usbSerialPortManager.isReceiver[1])
-//					{
-						new Thread(new Runnable() {
-							public void run() {
-								if(usbSerialPortManager.getDeviceSize() >1)
-								{
-									byte[] buf_2 = new byte[2000]; 
-									int re_2 = usbSerialPortManager.getSerialPortData(buf_2,1);
-									
-									if(re_2 != -1)
-									{
-										for(int i = 0 ; i< re_2 ;i++)
-										{
-											str2 +=(char)buf_2[i];
-										}
 
-										//tv.setText(MessageString);
-										if(isReceiver(str2))
-										{
-											if(MessageString.length()<500000)
-												MessageString = MessageString + new String(str2);
-											
-											com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[1] = true;
-											//Log.d("usbManager", "usb2:true"+","+MessageString.length());
-										}
-										else
-										{
-											com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[1] = false;
-											Log.d("usbManager", "usb2:false");
-										}
-									}	
-									str2 = "";
-									buf_2 = null;
-								}
-							}
-						}).start();
-//					}
-				*/
-					mHandler.sendEmptyMessageDelayed(Constants.MSG_RECEIVE, RECEIVE_FREQUENCY);
+                    mHandler.sendEmptyMessageDelayed(Constants.MSG_RECEIVE, RECEIVE_FREQUENCY);
+
 					break;
 				case Constants.MSG_CONNECT_SUCCESS:
 					tv.setText("connect success");
-					break;			
+					break;
+                /*Start to run ShowLight*/
 				case Constants.MSG_SHOW_LIGHT:
 					Log.d("debug", "Enter MSG_SHOW_LIGHT");
 
-                    if (bShowLightStart == false) {
+                    if (!bShowLightStart) {
                         // Start upload task repeatedly  every THLApp.upload_time.
-                        //ScheduledThreadPoolExecutor exec = new ScheduledThreadPoolExecutor(1);
-                        long period = 1000; //1000; // the period between successive executions
-                        scheduledFuture = exec.scheduleAtFixedRate(new ShowLight(), period, period, TimeUnit.MILLISECONDS);
+                        // SHOW_LIGHT_FREQUENCY : the period between successive executions
+                        scheduledFuture = exec.scheduleAtFixedRate(new ShowLight(), SHOW_LIGHT_FREQUENCY, SHOW_LIGHT_FREQUENCY, TimeUnit.MILLISECONDS);
                         bShowLightStart = true;
                     }
                     else
                     {
                         //do nothing.
                     }
-
 					break;
                 /*解析receiver收到的資料 然後把它存成list, 去調音量, 每兩秒執行一次*/
 				case Constants.MSG_UPLOAD:
                     Log.d("debug", "Enter MSG_UPLOAD");
 					mHandler.removeMessages(Constants.MSG_RECEIVE);     //解析資料時不收資料
 					mHandler.removeMessages(Constants.MSG_UPLOAD);
-					parseBeaconDataToList();
+					parseBeaconDataToList();                               //
 					tempList = null;
 					tempList = cloneList(beaconList);
 					beaconList.clear();
@@ -422,18 +433,23 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
                     {
                         // Restart to record the audio volume.
                         StartRecordAudioVolume();
+                        //=====(Optional) Turn off the audio.============================//
+                        //bAudioOn = false;
 
-                        if (THLApp.DEMO == true && bShowLightStart == false)
+                        //Start show light after 同步
+                        if (THLApp.DEMO && !bShowLightStart)
                         {
-                            scheduledFuture = exec.scheduleAtFixedRate(new ShowLight(), 1000, 1000, TimeUnit.MILLISECONDS);
+                            scheduledFuture = exec.scheduleAtFixedRate(new ShowLight(), SHOW_LIGHT_FREQUENCY, SHOW_LIGHT_FREQUENCY, TimeUnit.MILLISECONDS);
                             bShowLightStart = true;
                         }
+
                     }
                     else
                     {
                         for(int i = 0 ; i < u32TempListSize ; i++)
                         {
                             Log.d("beacon", "major:"+tempList.get(i).major + ",minor:"+tempList.get(i).minor);
+                            //Major 調音量
                             THLApp.volume = Float.valueOf(tempList.get(i).major)/100;
                             tv_volume.setText(THLApp.volume + "");
 
@@ -451,9 +467,15 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
                             }
                             isGetVoiceRun = false;     // Stop getting background noise.
 
+                            /*Start to announce after the user is closing.*/
+                            if(!tempList.get(i).major.equals("0"))
+                            {
+                                //bAudioOn = true;
+                            }
                             String sMinor = tempList.get(i).minor;
+                            String sMajor = tempList.get(i).major;
                             // 同步時間, only for demo. The value of minor is for the traffic light time.
-                            if (THLApp.DEMO && !sMinor.equals("0"))
+                            if (THLApp.DEMO && !sMinor.equals("0") && sMajor.equals("0"))
                             {
                                 Log.d("terry", "tempList.get(i).minor : " + tempList.get(i).minor + " i : " + i);
                                 isRed = false;
@@ -462,17 +484,18 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
                                 tv_green.setBackgroundResource(R.drawable.green_light);
                                 tv_red.setBackgroundResource(R.drawable.gray_light);
                                 tv_red.setText("");
-
+                                //Stop show light when 同步
                                 scheduledFuture.cancel(false);
                                 bShowLightStart = false;
-                                //scheduledFuture = exec.scheduleAtFixedRate(new ShowLight(), 1000, 1000, TimeUnit.MILLISECONDS);
                             }
                         }
                     }
 
                     u32UploadCount++;
                     // Reset u32UploadCount and fMaxVolume every 10 seconds.
-                    if (u32UploadCount == 5)
+                    // 當同時收到好幾筆調聲音的需求時, 取最大的, 存到 fMaxVolume
+                    // 維持十秒後, 重新記錄聲音最大值
+                    if (u32UploadCount == UPLOAD_TURNS)
                     {
                         u32UploadCount = 0;
                         fMaxVolume = 0;
@@ -511,25 +534,29 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
                                 str1 +=(char)buf[j];
                             }
                             //tv.setText(MessageString);
-                            //看是否有 command not found 字眼
+                            //看是否有 command not found 字眼, 沒有就是 RECEIVER.
                             if(isReceiver(str1))
                             {
                                 if(MessageString.length()<500000)
                                     MessageString = MessageString + new String(str1);
-                                //Log.d("usbManager", "usb1:true"+","+MessageString.length());
+                                //Log.d("usbManager", "usb1:true"+","+MessageString.length()+i);
                                 com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[i] = true;
+                                //Record the receiver location.
+                                aReceiverRecord.add(i);
                             }
                             else
                             {
                                 com.thlight.wifireceiver.usbSerialPortManager.aIsReceiver[i] = false;
-                                Log.d("usbManager", "usb1:false");
+                                Log.d("usbManager", "usb1:false"+i);
+                                usbSerialPortManager.SendCMD(THLApp.SET_KEEP_SETTING, i);
+                                //aReceiverRecord.add(i);  //for test
                             }
                         }
                         str1 = "";
                         buf = null;
                     }
                     break;
-                case Constants.test:
+                case Constants.MSG_NOTIFY_UART:
 
                     SerialPortFinder abc = new SerialPortFinder();
                     String[] hebe = abc.getAllDevices();
@@ -540,13 +567,17 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
                     }
 
                     try {
-                        spp = new SerialPort(new File("/dev/ttyS0"),115200, 0);
+                        spp = new SerialPort(new File(UART_PATH1), BAUD_RATE, 0);
+                        spp2 = new SerialPort(new File(UART_PATH2), BAUD_RATE, 0);
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
 
                     mOutputStream=spp.getOutputStream();//(FileOutputStream) spp.getOutputStream();
                     mInputStream=spp.getInputStream();//(FileInputStream) spp.getInputStream();
+
+                    mOutputStream2=spp2.getOutputStream();//(FileOutputStream) spp.getOutputStream();
+                    mInputStream2=spp2.getInputStream();//(FileInputStream) spp.getInputStream();
 
                     try {
                         mOutputStream.write("hebe".getBytes());
@@ -555,24 +586,80 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
                         e.printStackTrace();
                     }
 
+                    int count = 0;
+                    new Thread(new Runnable() {
+
+                        @Override
+                        public void run() {
+                            while (true)
+                            {
+                                try {
+                                    mOutputStream.write("help\r\n".getBytes());
+                                    Thread.sleep(1000);
+                                    //mOutputStream.write("e".getBytes());
+                                    Thread.sleep(1000);
+                                    //mOutputStream.write("l".getBytes());
+                                    Thread.sleep(1000);
+                                    //mOutputStream.write("p".getBytes());
+                                    Thread.sleep(1000);
+                                    //mOutputStream.write("\r\n".getBytes());
+                                    Thread.sleep(1000);
+                                    mOutputStream2.write("help\r\n".getBytes());
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                } catch (InterruptedException e) {
+                                    e.printStackTrace();
+                                }
+                                try {
+                                    Thread.sleep(3000);
+                                } catch (InterruptedException e) {
+                                    e.printStackTrace();
+                                    break;
+                                }
+                            }
+                        }
+                    }).start();
 
                     new Thread(new Runnable() {
                         @Override
                         public void run() {
 
-                            for (int i = 0; i<1000; i++)
+                            while(true)
                             {
                                 int size = 0;
 
-                                Log.d("5566", "size: " + size);
-                                byte[] buffer = new byte[64];
+                                byte[] buffer = new byte[128];
                                 //if (mInputStream == null) return;
                                 try {
                                     size = mInputStream.read(buffer);
                                 } catch (IOException e) {
                                     e.printStackTrace();
                                 }
-                                Log.d("5566", "size: " + size);
+                                Log.d("5566", "size: " + size );
+                                if (size > 0) {
+                                    onDataReceived(buffer, size);
+                                }
+
+                            }
+                        }
+                    }).start();
+
+                    new Thread(new Runnable() {
+                        @Override
+                        public void run() {
+
+                            while(true)
+                            {
+                                int size = 0;
+
+                                byte[] buffer = new byte[128];
+                                //if (mInputStream == null) return;
+                                try {
+                                    size = mInputStream2.read(buffer);
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                }
+                                Log.d("5566", "size2: " + size );
                                 if (size > 0) {
                                     onDataReceived(buffer, size);
                                 }
@@ -587,9 +674,13 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
 	};
 
     SerialPort spp ;
-    InputStream mInputStream;
+    SerialPort spp2 ;
 
+    InputStream mInputStream;
     OutputStream mOutputStream;
+
+    InputStream mInputStream2;
+    OutputStream mOutputStream2;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -688,81 +779,33 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
         
         //sp.play(sp_Id,1.0f,1.0f,0,0,0.1f);
         
-        light_time = Integer.valueOf(THLApp.green_light);
+        //light_time = Integer.valueOf(THLApp.green_light);             //Depend on the gpio.
         
-        //mHandler.sendEmptyMessageDelayed(Constants.MSG_SHOW_MAC, 3000);   
+        //mHandler.sendEmptyMessageDelayed(Constants.MSG_SHOW_MAC, 3000);
+        /*Delete the log files that create by Banana Pi  for each hour. */
         mHandler.sendEmptyMessageDelayed(Constants.MSG_DELETE_AW_FILE, 1);
-        mHandler.sendEmptyMessageDelayed(Constants.MSG_RECEIVE, RECEIVE_FREQUENCY);
-        mHandler.sendEmptyMessageDelayed(Constants.MSG_UPLOAD,1000);
+        /*解析receiver收到的資料 然後把它存成list, 去調音量*/
+        mHandler.sendEmptyMessageDelayed(Constants.MSG_UPLOAD, UPLOAD_FREQUENCY);
+        /*對 UART 去做控制, 送資料與接受資料*/
+        //mHandler.sendEmptyMessage(Constants.MSG_NOTIFY_UART);
 
 		/*=====================Audio record ==============================*/
         StartRecordAudioVolume();  // 取得背景音量
         /*======================================================================*/
 
-        Log.d("5566", "Start");
-        //mHandler.sendEmptyMessageDelayed(Constants.test, 10000);
-        //mHandler.sendEmptyMessage(Constants.test);
-
-        SerialPortFinder abc = new SerialPortFinder();
-        String[] hebe = abc.getAllDevices();
-
-        for (int i =0; i< hebe.length; i++)
-        {
-            Log.d("5566", "hebe[" + i +"] :" + hebe[i]);
-        }
-        Process su;
-        DataOutputStream opt = null;
-        //su = Runtime.getRuntime().exec("su");
-
-        // Log.d("5566", "p.exitValue() : " + su.exitValue());
-
-/*
-        try {
-            spp = new SerialPort(new File("/dev/ttyS0"),115200, 0);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        mOutputStream=spp.getOutputStream();//(FileOutputStream) spp.getOutputStream();
-        mInputStream=spp.getInputStream();//(FileInputStream) spp.getInputStream();
-
-        try {
-            mOutputStream.write("hebe".getBytes());
-            mOutputStream.write("\n".getBytes());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-
-                for (int i = 0; i<1000; i++)
-                {
-                    int size = 0;
-
-                    Log.d("5566", "size: " + size);
-                    byte[] buffer = new byte[64];
-                    //if (mInputStream == null) return;
-                    try {
-                        size = mInputStream.read(buffer);
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                    Log.d("5566", "size: " + size);
-                    if (size > 0) {
-                        onDataReceived(buffer, size);
-                    }
-
-                }
-            }
-        }).start();
-*/
         //TestLED is a thread.
 //        TestLED testLED = new TestLED();
 //        testLED.start();
 
+        /*
+        PeripheralManagerService manager = new PeripheralManagerService();
+        List<String> portList = manager.getGpioList();
+        if (portList.isEmpty()) {
+            Log.d("debug", "No GPIO port available on this device.");
+        } else {
+            Log.d("debug", "List of available ports: " + portList);
+        }
+*/
     }
 
     void onDataReceived(final byte[] buffer, final int size) {
@@ -990,72 +1033,59 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
             public void run() {
                 mAudioRecord.startRecording();
                 short[] buffer = new short[BUFFER_SIZE];
-                double dVolumeAverage = 0;
                 ArrayList<Double> VolumeList = new ArrayList<Double>();
+                int u32RedTime = (Integer.parseInt(THLApp.red_light)) * 1000;   // 紅燈時間 ms
+                int u32TakeAverageSize = (u32RedTime * CHANGE_VOLUME_FREQUENCY)/(RECORD_VOLUME_FREQUENCY * REFERENCE_TIMES);
 
                 while (isGetVoiceRun) {
-                    //r是实际读取的数据长度，一般而言r会小于buffersize
-                    int r = mAudioRecord.read(buffer, 0, BUFFER_SIZE);
-                    long v = 0;
-                    dVolumeAverage = 0;
-                    // 将 buffer 内容取出，进行平方和运算
-                    for (int i = 0; i < buffer.length; i++) {
-                        v += buffer[i] * buffer[i];
-                    }
-					//Log.d("terry", "VolumeList.size(): " + VolumeList.size());
-                    // 平方和除以数据总长度，得到音量大小。
-                    double mean = v / (double) r;
-                    double volume = 10 * Math.log10(mean); //取分貝值
-
-                    VolumeList.add(volume);               // Add to a list.
-                    //Log.d("terry", "分貝值:" + volume);
-
-                    if (VolumeList.size() == CHANGE_VOLUME_FREQUENCY/RECORD_VOLUME_FREQUENCY) {
-                        //Find the extremely value and remove. It's take 10% now.
-                        for (int i = 0; i < EXTREMELY_VALUE_RANGE * VolumeList.size(); i++) {
-                            Object obj = Collections.max(VolumeList);
-                            VolumeList.remove(obj);
-                            obj = Collections.min(VolumeList);
-                            VolumeList.remove(obj);
-                        }
-
-                        for (int i = 0; i < VolumeList.size(); i++) {
-                            dVolumeAverage = dVolumeAverage + VolumeList.get(i);
-                        }
-                        //Get volume average;
-                        dVolumeAverage = dVolumeAverage / VolumeList.size();
-                        VolumeList.clear();
-                        Log.d("terry", "平均分貝: " + dVolumeAverage);
-
-                        //According to the average background volume to modify the volume.
-                        if (dVolumeAverage > u32BgNoiseLevel2) {
-                            Log.d("terry", "setVolume: " + fVolumeLevel4);
-                            mp.setVolume(fVolumeLevel4, fVolumeLevel4);
-                            THLApp.volume = fVolumeLevel4;
-                        } else if (dVolumeAverage > u32BgNoiseLevel1 && dVolumeAverage < u32BgNoiseLevel2) {
-                            Log.d("terry", "setVolume: " + fVolumeLevel3);
-                            mp.setVolume(fVolumeLevel3, fVolumeLevel3);
-                            THLApp.volume = fVolumeLevel3;
-                        } else {
-                            Log.d("terry", "setVolume: " + fVolumeLevel1);
-                            mp.setVolume(fVolumeLevel1, fVolumeLevel1);
-                            THLApp.volume = fVolumeLevel1;
-                        }
-
-                        //Modify the value of volume on the UI on a UI thread.
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                tv_volume.setText(String.valueOf(THLApp.volume));
-                            }
-                        });
-                    }
 
                     try {
                         Thread.sleep(RECORD_VOLUME_FREQUENCY);      // Every 1 second check the background value.
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
+
+                    //r是实际读取的数据长度，一般而言r会小于buffersize
+                    //int r = mAudioRecord.read(buffer, 0, BUFFER_SIZE);
+
+                    //Only record noise when red light.
+                    if (isRed)
+                    {
+                        int r = mAudioRecord.read(buffer, 0, BUFFER_SIZE);
+                        long v = 0;
+                        // 将 buffer 内容取出，进行平方和运算
+                        for (int i = 0; i < buffer.length; i++) {
+                            v += buffer[i] * buffer[i];
+                        }
+                        //Log.d("terry", "VolumeList.size(): " + VolumeList.size());
+                        // 平方和除以数据总长度，得到音量大小。
+                        double mean = v / (double) r;
+                        double volume = 10 * Math.log10(mean); //取分貝值
+
+                        VolumeList.add(volume);               // Add to a list.
+                        //Log.d("terry", "分貝值:" + volume);
+
+                        // 每隔 u32TakeAverageSize 就去調整音量
+                        if (VolumeList.size() == u32TakeAverageSize) {
+
+                            ModifyVolumeManner(VolumeList);
+                            VolumeList.clear();
+
+                            //Modify the value of volume on the UI on a UI thread.
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    tv_volume.setText(String.valueOf(THLApp.volume));
+                                }
+                            });
+                        }
+                    }
+                    else
+                    {
+                        Log.d("debug", "Don't get voice at green light time.");
+                        continue;
+                    }
+
                 }
                 mAudioRecord.stop();
                 mAudioRecord.release();
@@ -1064,7 +1094,121 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
             }
         }).start();
     }
-	
+
+    // The algorithm of changing volume
+    public double ModifyVolumeManner(ArrayList<Double> volumeList)
+    {
+        dVolumeAverage = 0;
+
+        //Find the extremely value and remove. It's take 10% now.
+        for (int i = 0; i < EXTREMELY_VALUE_RANGE * volumeList.size(); i++) {
+            Object obj = Collections.max(volumeList);
+            volumeList.remove(obj);
+            obj = Collections.min(volumeList);
+            volumeList.remove(obj);
+        }
+
+        for (int i = 0; i < volumeList.size(); i++) {
+            dVolumeAverage = dVolumeAverage + volumeList.get(i);
+        }
+        //Get volume average;
+        aAverageVolume.add(dVolumeAverage / volumeList.size());
+
+        if (aAverageVolume.size() == REFERENCE_TIMES)
+        {
+            dVolumeAverage = 0;
+            for (int i =0; i<REFERENCE_TIMES; i++) {
+                dVolumeAverage = dVolumeAverage + aAverageVolume.get(i);
+                Log.d("terry", "分貝: " + aAverageVolume.get(i));
+
+            }
+            dVolumeAverage = dVolumeAverage/REFERENCE_TIMES;
+
+            Log.d("terry", "平均分貝: " + dVolumeAverage);
+            //According to the average background volume to modify the volume.
+            if (dVolumeAverage > u32BgNoiseLevel2) {
+                Log.d("terry", "setVolume: " + fVolumeLevel4);
+                mp.setVolume(fVolumeLevel4, fVolumeLevel4);
+                THLApp.volume = fVolumeLevel4;
+            } else if (dVolumeAverage > u32BgNoiseLevel1 && dVolumeAverage < u32BgNoiseLevel2) {
+                Log.d("terry", "setVolume: " + fVolumeLevel3);
+                mp.setVolume(fVolumeLevel3, fVolumeLevel3);
+                THLApp.volume = fVolumeLevel3;
+            } else {
+                Log.d("terry", "setVolume: " + fVolumeLevel1);
+                mp.setVolume(fVolumeLevel1, fVolumeLevel1);
+                THLApp.volume = fVolumeLevel1;
+            }
+
+            aAverageVolume.clear();
+        }
+
+        return dVolumeAverage;
+    }
+
+    /*Get data from beacon to check the GPIO status*/
+    public  void CheckGPIO(final int index)
+    {
+
+        new Thread(new Runnable() {
+            public void run() {
+
+                String sBeaconData = "";
+                byte[] buf = new byte[2000];
+                int re = usbSerialPortManager.getSerialPortData(buf, index);
+
+                if(re != -1)  // If get data from beacon.
+                {
+                    for(int j = 0 ; j< re ;j++)
+                    {
+                        sBeaconData +=(char)buf[j];
+                    }
+
+                    //Check GPIO at first.
+                    if (sBeaconData.contains("GPIO"))
+                    {
+                        if (sBeaconData.contains("GPIO6 1"))
+                        {
+                            RTPause = true;      //Counting red time pause.
+                            GTPause = false;     //Starting to count green time.
+                            u32GreenTime = 0;
+
+                            u32PreRedTime = u32RedTime;         // Record red time.
+
+                            //It's not first round, and traffic light starts counting.
+                            if (u32RedTime != 0)
+                                bFirstRound = false;
+                            Log.d("hebe", "sBeaconData: "+sBeaconData);
+                        }
+                        else if (sBeaconData.contains("GPIO6 0")) {
+                            GTPause = true;    //Counting green time pause.
+                            RTPause = false;    //Starting to count red time.
+                            u32RedTime = 0;
+                            u32PreGreenTime = u32GreenTime;         // Record green time.
+                            Log.d("hebe", "sBeaconData: "+sBeaconData);
+                        }
+                        else if (sBeaconData.contains("GPIO7 1"))
+                        {
+                            RTPause = false;
+                            u32RedTime = 0;
+                            Log.d("hebe", "sBeaconData: "+sBeaconData);
+                        }
+                        else if (sBeaconData.contains("GPIO7 0")) {
+                            RTPause = true;
+                        }
+                    }
+
+                    Log.d("hebe", "u32PreGreenTime: "+u32PreGreenTime + " u32PreRedTime: " + u32PreRedTime);
+                    Log.d("hebe", "u32GreenTime: "+u32GreenTime + " u32RedTime: " + u32RedTime);
+
+                }
+                sBeaconData = "";
+                buf = null;
+
+            }
+        }).start();
+
+    }
 	/***************************************************************/
 	public static ArrayList<BeaconInfo> cloneList(ArrayList<BeaconInfo> list) {
 		ArrayList<BeaconInfo> clone = new ArrayList<BeaconInfo>(list.size());
@@ -1198,7 +1342,7 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
 //		Log.d("debug", "==========================");
 		for(int i = 0 ; i < receivers.length ; i++)
 		{
-			String data = receivers[i].replace("\r", "");    //???
+			String data = receivers[i].replace("\r", "");    //for change line
 			if(data.length() == Constants.BEACON_DATA_FORMAT_LENGTH1
                     || data.length() == Constants.BEACON_DATA_FORMAT_LENGTH2
                     || data.length() == Constants.BLE_DATA_FORMAT_LENGTH)
@@ -1251,7 +1395,7 @@ public class UIMain extends Activity implements View.OnClickListener , UncaughtE
 					continue;
 				}
 
-				if(!beaconInfo.uuid.equals(THLApp.UUID))
+				if(!beaconInfo.uuid.equals(THLApp.RECEIVE_UUID))
 				{
                     Log.d("debug", "UUID is not match.");
 					continue;

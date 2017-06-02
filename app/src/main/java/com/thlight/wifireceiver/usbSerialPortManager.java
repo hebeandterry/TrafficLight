@@ -160,13 +160,13 @@ public class usbSerialPortManager {
 
  		// 設定傳送給 Beacon 的指令, 預設綠燈的燈號和秒數為 Minor, 然後都會補足 4 bytes.
  		if(GreenLightHexTime.length() == 4)    				
-			OutputStirng = THLApp.SET_INFO_COMMAND + " " +number+" "+ GreenLightHexTime+" "+red_time+"\n";
+			OutputStirng = THLApp.SET_INFO_COMMAND + " " +number+" "+ GreenLightHexTime+" "+THLApp.REF_RSSI+"\n";
 		else if(GreenLightHexTime.length() == 3)
-			OutputStirng = THLApp.SET_INFO_COMMAND + " " +number+" 0"+GreenLightHexTime+" "+red_time+"\n";
+			OutputStirng = THLApp.SET_INFO_COMMAND + " " +number+" 0"+GreenLightHexTime+" "+THLApp.REF_RSSI+"\n";
 		else if(GreenLightHexTime.length() == 2)
-			OutputStirng = THLApp.SET_INFO_COMMAND + " " +number+" 00"+GreenLightHexTime+" "+red_time+"\n";
+			OutputStirng = THLApp.SET_INFO_COMMAND + " " +number+" 00"+GreenLightHexTime+" "+THLApp.REF_RSSI+"\n";
 		else if(GreenLightHexTime.length() == 1)
-			OutputStirng = THLApp.SET_INFO_COMMAND + " " +number+" 000"+GreenLightHexTime+" "+red_time+"\n";
+			OutputStirng = THLApp.SET_INFO_COMMAND + " " +number+" 000"+GreenLightHexTime+" "+THLApp.REF_RSSI+"\n";
 		
  		mHandler.postDelayed(new Runnable() {
 			public void run() {

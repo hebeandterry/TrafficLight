@@ -30,12 +30,66 @@
     </item>
     <item
         is-multidex="false"
+        jar="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\incremental-runtime-classes\debug\instant-run.jar"
+        jumboMode="true"
+        optimize="true"
+        revision="23.0.3"
+        sha1="8874d373041a561830c2d335cf3556917e334ebc">
+        <dex dex="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\pre-dexed\debug\instant-run_f0a981db4995b2b52b35681fafbccacac51b5e6b.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\exploded-aar\com.android.support\animated-vector-drawable\23.3.0\jars\classes.jar"
+        jumboMode="true"
+        optimize="true"
+        revision="23.0.3"
+        sha1="23be6993826b8fd88bbc8d14928bb3b8960d3d4e">
+        <dex dex="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\pre-dexed\debug\com.android.support-animated-vector-drawable-23.3.0_52fe79cd24d6fa1a534191ec066e6c868474fb7b.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\exploded-aar\com.android.support\appcompat-v7\23.3.0\jars\classes.jar"
+        jumboMode="true"
+        optimize="true"
+        revision="23.0.3"
+        sha1="1b8e03daaa43fb0a4cd57e378167c2fd70454c1e">
+        <dex dex="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\pre-dexed\debug\com.android.support-appcompat-v7-23.3.0_f6526d81f7ad1c00f08d4972e7c267ee9669941e.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\exploded-aar\com.android.support\support-v4\23.3.0\jars\classes.jar"
+        jumboMode="true"
+        optimize="true"
+        revision="23.0.3"
+        sha1="8a034dd16c0dfd75fe86c52c2cd581592acc684a">
+        <dex dex="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\pre-dexed\debug\com.android.support-support-v4-23.3.0_7f737c638066aacf5640a8fb785f0719590f0686.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="C:\Users\Default\AppData\Local\Android\extras\android\m2repository\com\android\support\support-annotations\23.3.0\support-annotations-23.3.0.jar"
+        jumboMode="true"
+        optimize="true"
+        revision="23.0.3"
+        sha1="db7791d75a07fef9844d06236c1c59ba7bf6997c">
+        <dex dex="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\pre-dexed\debug\support-annotations-23.3.0_2ecdeadf81ce5cf4b29942f04a6497782b45dfdf.jar" />
+    </item>
+    <item
+        is-multidex="false"
         jar="C:\Users\Default\AppData\Local\Android\extras\android\m2repository\com\android\support\support-annotations\23.3.0\support-annotations-23.3.0.jar"
         jumboMode="false"
         optimize="true"
         revision="23.0.3"
         sha1="db7791d75a07fef9844d06236c1c59ba7bf6997c">
         <dex dex="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\pre-dexed\debug\support-annotations-23.3.0_2ecdeadf81ce5cf4b29942f04a6497782b45dfdf.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\exploded-aar\com.android.support\support-vector-drawable\23.3.0\jars\classes.jar"
+        jumboMode="true"
+        optimize="true"
+        revision="23.0.3"
+        sha1="a0b5d60246cd9d4f3f2443611b3b4c25265840b5">
+        <dex dex="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\pre-dexed\debug\com.android.support-support-vector-drawable-23.3.0_821e59c3974bc9c23c48a295d9894905696755cd.jar" />
     </item>
     <item
         is-multidex="false"
@@ -54,6 +108,24 @@
         revision="23.0.3"
         sha1="4da5a4d697d32497c6f85567a5112e62fdfd0676">
         <dex dex="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\pre-dexed\debug\internal_impl-23.3.0_5219138f7cb543a570f3e52bb2796f04dbc7a408.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\exploded-aar\com.android.support\support-v4\23.3.0\jars\libs\internal_impl-23.3.0.jar"
+        jumboMode="true"
+        optimize="true"
+        revision="23.0.3"
+        sha1="4da5a4d697d32497c6f85567a5112e62fdfd0676">
+        <dex dex="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\pre-dexed\debug\internal_impl-23.3.0_5219138f7cb543a570f3e52bb2796f04dbc7a408.jar" />
+    </item>
+    <item
+        is-multidex="false"
+        jar="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\incremental-classes\debug\instant-run-bootstrap.jar"
+        jumboMode="true"
+        optimize="true"
+        revision="23.0.3"
+        sha1="97f991bab5a9d2e45a1fac80bde42002b1cc05af">
+        <dex dex="C:\Users\Public\AndroidStudioProjects\Traffic light\app\build\intermediates\pre-dexed\debug\instant-run-bootstrap_18b0ca4b80f6b054bbea4f31fcfc5d6ce4c74688.jar" />
     </item>
 
 </items>

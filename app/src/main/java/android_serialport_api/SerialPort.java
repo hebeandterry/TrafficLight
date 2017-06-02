@@ -40,7 +40,7 @@ public class SerialPort {
 	private FileOutputStream mFileOutputStream;
 
 	public SerialPort(File device, int baudrate, int flags) throws SecurityException, IOException {
-        Log.d("5566",   " device.canRead() : " + device.canRead() + " device.canWrite() : " + device.canWrite());
+
 		/* Check access permission */
 		if (!device.canRead() || !device.canWrite()) {
 			try {
@@ -51,9 +51,7 @@ public class SerialPort {
 				String cmd = "chmod 666 " + device.getAbsolutePath() + "\n"
 						+ "exit\n";
 				su.getOutputStream().write(cmd.getBytes());
-                //Log.d("5566", "cmd: " + cmd);
 
-				Log.d("5566", "su.waitFor() : " + su.waitFor() + " device.canRead() : " + device.canRead() + " device.canWrite() : " + device.canWrite());
 				if ((su.waitFor() != 0) || !device.canRead()
 						|| !device.canWrite()) {
 					throw new SecurityException();

@@ -17,11 +17,14 @@ import android.widget.Toast;
 /** ======================================================================== */
 public class THLApp extends Application
 {
-	public static final boolean DEMO = true;
+	public static final boolean DEMO = false;
+	public static final String REF_RSSI = "C1";   /*IOS calculate the RSSI by REF_RSSI.*/
     public static String red_light = "";
     public static String green_light = "";
     public static String number = "";
-    public static float volume = 0.0f;  
+    public static float volume = 0.0f;
+	public static boolean bEastWest = false;         //< Decide for the direction.
+    public static boolean bSouthNorth = false;
     
     public static String deviceName = "";
 
@@ -30,7 +33,7 @@ public class THLApp extends Application
     public static String STORE_PATH	 = Environment.getExternalStorageDirectory().toString()+ "/Traffic Light/";
 	public static String SET_INFO_COMMAND = "set_beacon_info E2C56DB5-DFFB-48D2-B060-D0F5A71096E1";
     public static String RECEIVE_UUID = "436DFAB4-03AF-4F10-A039-4503BB94BD56";
-	public static String SET_KEEP_SETTING = "set_keep_setting 0 \n";
+	public static String SET_KEEP_SETTING = "set_keep_setting 0 \n";          //Set writing Major Minor to the ROM.
     public static String GET_KEEP_SETTING = "get_keep_setting \n";
      
 	/** ========================================================== */
@@ -72,9 +75,9 @@ public class THLApp extends Application
 		
 		/** */		
 		red_light  		 = sp.getString("red_light", "10");
-		green_light  	 = sp.getString("green_light", "30");
+		green_light  	     = sp.getString("green_light", "30");
 		volume   		 = sp.getFloat("volume",  1.0f);
-		number			 = sp.getString("number",  "1");             //Default device number.
+		number			 = sp.getString("number",  "39");             //Default device number.
 		//IP   		 = sp.getString("IP", "61.216.93.208");
 
 	}

@@ -9,7 +9,7 @@ public class Constants {
 	public static final int MSG_SHOW_TIME		= 1006;
 	public static final int MSG_DELETE_AW_FILE  = 1008;         //Delete the log files that create by Banana Pi
     public static final int MSG_RECOGNIZE_RECEIVER = 1009;     // Check receiver port and beacon port.
-	public static final int test  = 1010;
+	public static final int MSG_NOTIFY_UART  = 1010;            //Send MSG to UART to represent alive.
 	
 	public static final int TCPIP_SET_UPLOAD_TIME 			= 2000; 
 	public static final int TCPIP_SET_SCAN_TIME   			= 2001; 
